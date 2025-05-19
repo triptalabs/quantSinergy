@@ -8,12 +8,14 @@ from db.init_db import init_db, load_all_trades, get_connection
 from models.trade import Trade
 from services.binance_client import client, get_balances, get_price
 
+# Configuración de la página
 st.set_page_config(
-    page_title="Control de Trading",
+    page_title="Dashboard Trading",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
+# --- Funciones de Trade ---
 def insert_trade(trade: Trade):
     conn = get_connection()
     data = trade.to_dict()
@@ -24,92 +26,84 @@ def insert_trade(trade: Trade):
     conn.commit()
     conn.close()
 
-def main():
-    # --- Inicializar DB y cargar datos ---
-    init_db()
-    df = load_all_trades()
+# --- Funciones Binance ---
+def get_assets_df():
+    spot = get_balances()
+    spot_df = pd.DataFrame(spot)
+    spot_df["free"] = spot_df["free"].astype(float)
+    spot_df["locked"] = spot_df["locked"].astype(float)
+    spot_df["total"] = spot_df["free"] + spot_df["locked"]
+    spot_df["origin"] = "spot"
 
-    # --- Sidebar: Binance API con toggle connect/disconnect ---
-    if "binance_connected" not in st.session_state:
-        st.session_state.binance_connected = False
+    futures = client.futures_account_balance()
+    fut_df = pd.DataFrame(futures).rename(columns={"balance": "total"})
+    fut_df["total"] = fut_df["total"].astype(float)
+    fut_df["free"] = fut_df["total"]
+    fut_df["locked"] = 0.0
+    fut_df["origin"] = "futures"
 
-    btn_label = "Conectar Binance" if not st.session_state.binance_connected else "Desconectar Binance"
-    if st.sidebar.button(btn_label):
-        st.session_state.binance_connected = not st.session_state.binance_connected
+    assets_df = pd.concat([
+        spot_df[["asset","free","locked","total","origin"]],
+        fut_df[["asset","free","locked","total","origin"]]
+    ], ignore_index=True)
 
-    if st.session_state.binance_connected:
+    def compute_value(row):
+        asset = row["asset"].upper()
+        qty = row["total"]
+        if asset == "USDT":
+            return qty
         try:
-            # Spot balances
-            spot = get_balances()  # [{ asset, free, locked }, ...]
-            # Futures balances
-            futures = client.futures_account_balance()  # [{ asset, balance }, ...]
+            price = get_price(f"{asset}USDT")
+            return qty * price
+        except:
+            return None
 
-            # Normalizar datos spot
-            spot_df = pd.DataFrame(spot)
-            spot_df["free"] = spot_df["free"].astype(float)
-            spot_df["locked"] = spot_df["locked"].astype(float)
-            spot_df["total"] = spot_df["free"] + spot_df["locked"]
-            spot_df["origin"] = "spot"
+    assets_df["value_usdt"] = assets_df.apply(compute_value, axis=1)
+    return spot_df, fut_df, assets_df
 
-            # Normalizar datos futures
-            futures_df = pd.DataFrame(futures)
-            futures_df = futures_df.rename(columns={"balance": "total"})
-            futures_df["total"] = futures_df["total"].astype(float)
-            futures_df["free"] = futures_df["total"]  # en futures todo es libre
-            futures_df["locked"] = 0.0
-            futures_df["origin"] = "futures"
-
-            # Unir
-            assets_df = pd.concat([spot_df[["asset","free","locked","total","origin"]],
-                                   futures_df[["asset","free","locked","total","origin"]]],
-                                  ignore_index=True)
-
-            # Calcular valor en USDT
-            def compute_value(row):
-                asset = row["asset"]
-                qty = row["total"]
-                if asset.upper() == "USDT":
-                    return qty
-                try:
-                    price = get_price(f"{asset}USDT")
-                    return qty * price
-                except:
-                    return None
-
-            assets_df["value_usdt"] = assets_df.apply(compute_value, axis=1)
-
-            st.sidebar.success("✅ Conectado a Binance")
-            st.sidebar.dataframe(
-                assets_df,
-                use_container_width=True,
-                height=400
-            )
-        except Exception as e:
-            st.sidebar.error(f"Error al conectar: {e}")
-
-    # --- Control de formulario ---
-    if "show_form" not in st.session_state:
+# --- Página Inicio ---
+def pagina_inicio():
+    st.header("Inicio")
+    if st.button("Conectar Binance" if not st.session_state.get("binance_connected", False) else "Desconectar Binance"):
+        st.session_state.binance_connected = not st.session_state.get("binance_connected", False)
         st.session_state.show_form = False
 
-    # --- Layout principal ---
-    col_table, col_form = st.columns([3, 1])
+    if st.session_state.get("binance_connected", False):
+        try:
+            spot_df, fut_df, assets_df = get_assets_df()
+            total = assets_df["value_usdt"].dropna().sum()
 
-    with col_table:
-        st.title("📈 Control de Trading")
-        if st.button("➕ Nueva operación"):
-            st.session_state.show_form = True
+            st.metric("Saldo Total (USDT)", f"{total:,.2f}")
 
-        if not df.empty:
-            st.dataframe(
-                df.drop(columns=["id"]),
-                use_container_width=True,
-                height=600,
-            )
+            detalle = st.selectbox("Detalles de:", ["Spot", "Futuros"])
+            if detalle == "Spot":
+                st.dataframe(
+                    spot_df[["asset","free","locked","total","value_usdt"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.dataframe(
+                    fut_df[["asset","free","locked","total","value_usdt"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+        except Exception as e:
+            st.error(f"Error al obtener datos de Binance: {e}")
+    else:
+        st.info("Presiona el botón para conectar a Binance")
 
-    with col_form:
-        if st.session_state.show_form:
+# --- Página Trades ---
+def pagina_trades():
+    st.header("Trades")
+    df = load_all_trades()
+
+    if st.button("➕ Nueva operación"):
+        st.session_state.show_form = True
+
+    if st.session_state.get("show_form", False):
+        with st.expander("Agregar Operación", expanded=True):
             with st.form("trade_form", clear_on_submit=True):
-                st.subheader("Agregar Operación")
                 pair           = st.text_input("Par (p. ej. BTC/USDT)", value="BTC/USDT")
                 leverage       = st.number_input("Apalancamiento", min_value=1, value=1, step=1)
                 qty            = st.number_input("Cantidad", min_value=0.0, step=0.0001)
@@ -144,13 +138,31 @@ def main():
                     else:
                         trade.calculate_commission()
                         trade.calculate_pnl_roi()
-
                     insert_trade(trade)
                     st.success("✅ Operación guardada")
                     st.session_state.show_form = False
                     df = load_all_trades()
-        else:
-            st.markdown("**Presiona ➕ para añadir una operación**")
+
+    if not df.empty:
+        st.dataframe(
+            df.drop(columns=["id"]),
+            use_container_width=True,
+            height=600,
+            hide_index=True
+        )
+    else:
+        st.info("No hay trades registrados aún.")
+
+# --- Función principal ---
+def main():
+    init_db()
+    if "show_form" not in st.session_state:
+        st.session_state.show_form = False
+    tabs = st.tabs(["Inicio", "Trades"])
+    with tabs[0]:
+        pagina_inicio()
+    with tabs[1]:
+        pagina_trades()
 
 if __name__ == "__main__":
     main()
