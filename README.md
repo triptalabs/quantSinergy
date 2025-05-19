@@ -1,6 +1,6 @@
-# 📈 Tabla-Trading: Control de Trading en Streamlit
+# 📈 quantSinergy: Control de Trading en Streamlit
 
-**Tabla-Trading** es una aplicación de escritorio local desarrollada en Python y Streamlit para llevar el control de tus operaciones de trading de manera sencilla, persistente y conectada a Binance.
+**quantSinergy** es una aplicación de escritorio local desarrollada en Python y Streamlit para llevar el control de tus operaciones de trading de manera sencilla, persistente y conectada a Binance.
 
 ---
 
@@ -52,7 +52,7 @@ Esta herramienta te permite:
 ## 📂 Estructura de carpetas
 
 ```bash
-Tabla-Trading/
+quantSinergy/
 ├── .gitignore            # Ignora venv, __pycache__, .db, .env
 ├── README.md             # Documentación principal
 ├── requirements.txt      # Dependencias Python
@@ -74,8 +74,8 @@ Tabla-Trading/
 1. Clona el repositorio:
 
    ```bash
-   git clone https://github.com/triptalabs/Tabla-Trading.git
-   cd Tabla-Trading
+   git clone https://github.com/triptalabs/quantSinergy.git
+   cd quantSinergy
    ```
 
 2. Crea y activa un entorno virtual (recomendado):
